@@ -2,28 +2,20 @@ package fr.catsoft.backpressured
 
 import fr.catsoft.backpressured.model.Message
 
-trait Producer[T] extends Actor[Unit] {
-
-  override private[back] def mailBoxLimit: Int = 0
-
+trait Producer[T] extends Actor[T] {
   def dest: Actor[T]
 
   def produce: Option[T]
 
+  override def mailBoxSize: Int = 0
+
+  override def process(implicit messageInContext: Message[T]): (T) => Unit = throw new UnsupportedOperationException
+
   override protected def runAction: Unit = {
     val destVal = dest
     produce match {
-      case Some(value) => {
-        send(dest, value)(None)
-        if (getOutPipe(destVal).isPressured) {
-          stop
-        }
-      }
+      case Some(value) => send(dest, value)
       case None => stop
     }
-  }
-
-  override def process(implicit messageInContext: Option[Message[Unit]]): (Unit) => Unit = Unit => {
-    throw new UnsupportedOperationException
   }
 }

@@ -1,6 +1,5 @@
 package fr.catsoft.backpressured.model
 
 import fr.catsoft.backpressured.Actor
-import fr.catsoft.backpressured.actor.LoopRunnable
 
-case class Message[T](sourceOption: Option[LoopRunnable], dest: Actor[T], content: T)
+case class Message[T](sourceOpt: Option[Actor[_]], dest: Actor[T], content: T)

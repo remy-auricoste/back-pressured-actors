@@ -3,13 +3,18 @@ package fr.catsoft.backpressured.model
 import scala.collection.mutable
 
 case class LimitedQueue[T](limit: Int) extends mutable.Queue[T] {
-  override def enqueue(elems: T*): Unit = {
+
+  /**
+    * @param elems
+    * @return true if queue is full
+    */
+  def add(elems: T*): Boolean = {
     val count = size + elems.size
-    super.enqueue(elems:_*)
-    if (count > limit) {
-      throw new FullQueueException(s"$count over limit $limit")
-    }
+    enqueue(elems: _*)
+    count > limit
+  }
+
+  def isFull: Boolean = {
+    size >= limit
   }
 }
-
-

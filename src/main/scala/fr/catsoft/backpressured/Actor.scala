@@ -1,97 +1,86 @@
 package fr.catsoft.backpressured
 
-import scala.util.{Failure, Success, Try, Random}
 import java.util.concurrent.ConcurrentHashMap
-import fr.catsoft.backpressured.model.{Pipe, Message, FullQueueException}
-import fr.catsoft.backpressured.actor.{Mailboxed, LoopRunnable}
 
-trait Actor[T] extends Mailboxed[Message[T]] with LoopRunnable {
-  val mailBoxLowLimit = mailBoxLimit / 2
+import fr.catsoft.backpressured.actor.LoopRunnable
+import fr.catsoft.backpressured.model.{LimitedQueue, Message}
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.Future
+import scala.util.{Failure, Random, Success, Try}
+import scala.collection.JavaConversions._
+
+trait Actor[T] extends LoopRunnable {
+  var pressureReceived = new ConcurrentHashMap[String, Boolean]()
+  var pressureSent = new ConcurrentHashMap[String, Boolean]()
+
+  def mailBoxSize: Int
+  protected val mailboxIn = LimitedQueue[Message[T]](mailBoxSize)
+  protected val mailboxPressure = LimitedQueue[T](mailBoxSize)
+
+  protected val mailBoxLowLimit: Int = mailBoxSize / 2
+  println(s"limit = $mailBoxLowLimit")
+
   private lazy val randomName = Random.nextInt().toString
 
   def name = randomName
 
-  def mailBoxSize = mailBox.size
-
-  val inPipes = new ConcurrentHashMap[LoopRunnable, Pipe]()
-  val outPipes = new ConcurrentHashMap[Actor[_], Pipe]()
-
-  def process(implicit messageInContext: Option[Message[T]]): T => Unit
+  def process(implicit messageInContext: Message[T]): T => Unit
 
   override protected def runAction: Unit = dequeue
 
   private def dequeue: Unit = {
-    Try(mailBox.dequeue()) match {
+//    println(s"$name treating message")
+    Try(mailboxIn.dequeue()) match {
       case Success(message) => {
-        message.sourceOption match {
-          case Some(source) if mailBox.size == mailBoxLowLimit && inPipes.get(source).isPressured =>
-            val pipe = inPipes.get(source)
-            val changed = pipe.setPressure(false)
-            if (changed) {
-              pipe.source.run
-            }
+//        println(s"$name, $message, ${mailboxIn.size}, $pressureReceived")
+        message.sourceOpt match {
+          case Some(source) if mailboxIn.size <= mailBoxLowLimit && Option(pressureSent.get(source.name)) == Some(true) => sendPressure(source, pressure = false)
           case _ =>
         }
-        implicit val implMessage = Some(message)
-        Try(process(implMessage)(message.content)) match {
+        Try(process(message)(message.content)) match {
           case Failure(ex) => {
             // TODO : handle ex
-            //println("ERROR : " + ex.getMessage)
+            ex.printStackTrace()
           }
           case _ =>
         }
       }
-      case Failure(ex: NoSuchElementException) =>
-        //println(s"$name empty")
-        inPipes.map(_._2).map {
-          pipe =>
-            pipe.setPressure(false)
-            pipe.source.run
-        }
-        stop
+      case Failure(ex: NoSuchElementException) => stop
     }
   }
 
-  def receive(message: Message[T], pipeOption: Option[Pipe] = None) = {
-    val dest = message.dest
-    dest.mailBox.enqueue(message)
-    pipeOption match {
-      case Some(pipe) if pipe.isPressured =>
-      case _ => dest.run
+  def receive(message: Message[T]): Future[Boolean] = Future.successful {
+    val wasEmpty = mailboxIn.isEmpty
+    val fullQueue = mailboxIn.add(message)
+    if (fullQueue) {
+      message.sourceOpt.map(sendPressure(_, pressure = true))
+    } else if (wasEmpty) {
+      start
     }
+    true
   }
 
-  protected def getOutPipe(dest: Actor[_]): Pipe = {
-    var pipe = outPipes.get(dest)
-    if (pipe == null) {
-      pipe = Pipe(this, dest)
-      outPipes.put(dest, pipe)
-      dest.inPipes.put(this, pipe)
-    }
-    pipe
-  }
-
-  def send[A](dest: Actor[A], content: A)(implicit messageInContext: Option[Message[T]]): Unit = {
+  def send[A](dest: Actor[A], content: A): Future[Boolean] = {
     val message = Message[A](Some(this), dest, content)
-    val pipe = getOutPipe(dest)
-    try {
-      dest.receive(message, Some(pipe))
-      if (pipe.isPressured) {
-        throw new FullQueueException("already pressured")
-      }
-    } catch {
-      case ex: FullQueueException => {
-        pipe.setPressure(true)
-        messageInContext.flatMap(_.sourceOption) match {
-          case Some(source) => inPipes.get(source).setPressure(true)
-          case None =>
-        }
-        stop
-      }
-    }
+    dest.receive(message)
   }
-}
 
-trait ActorCloneable { this: Actor[T] =>
-  def clone: Actor[T] with ActorCloneable[T]
+  def mailboxMessageWaitingSize: Int = mailboxIn.size
+
+  def receivePressure(name: String, pressure: Boolean): Future[Boolean] = Future {
+    pressureReceived.put(name, pressure)
+//    println(s"${this.name} : receive pressure $name -> $pressure")
+    if (pressure) {
+      stop
+    } else if (pressureReceived.forall(tuple => !tuple._2)) {
+      start
+    }
+    true
+  }
+
+  def sendPressure(dest: Actor[_], pressure: Boolean): Future[Boolean] = {
+//    println(s"${this.name} sending pressure ${dest.name} -> $pressure")
+    pressureSent.put(dest.name, pressure)
+    dest.receivePressure(this.name, pressure)
+  }
 }

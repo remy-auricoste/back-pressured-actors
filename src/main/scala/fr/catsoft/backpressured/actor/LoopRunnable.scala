@@ -1,24 +1,28 @@
 package fr.catsoft.backpressured.actor
 
 import scala.concurrent.Future
+import scala.concurrent.ExecutionContext.Implicits.global
 
-trait LoopRunnable {
-  def name: String
-
+trait LoopRunnable extends SwitchableMachine {
   private var running = false
 
-  protected def stop = this.synchronized {
-    running = false
-    //println(s"$name status : stopped")
+  override def isRunning: Future[Boolean] = Future.successful(running)
+
+  override def stop: Future[Boolean] = Future.successful {
+    synchronized {
+      running = false
+      running
+    }
   }
 
-
-  def run: Future[Unit] = Future {
-    this.synchronized {
+  override def start: Future[Boolean] = Future.successful {
+    synchronized {
       if (!running) {
-        //println(s"$name status : running")
         running = true
         runLoop
+        running
+      } else {
+        running
       }
     }
   }
@@ -35,5 +39,4 @@ trait LoopRunnable {
   }
 
   protected def runAction: Unit
-
 }
