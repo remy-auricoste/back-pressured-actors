@@ -10,10 +10,11 @@ import scala.util.{Failure, Random, Success, Try}
 import scala.collection.JavaConversions._
 
 trait Actor[T] extends LoopRunnable {
-  var pressureReceived = new ConcurrentHashMap[String, Boolean]()
-  var pressureSent = new ConcurrentHashMap[String, Boolean]()
+  protected val pressureReceived = new ConcurrentHashMap[String, Boolean]()
+  protected val pressureSent = new ConcurrentHashMap[String, Boolean]()
 
   def mailBoxSize: Int
+
   protected val mailboxIn = LimitedQueue[Message[T]](mailBoxSize)
 
   protected val mailBoxLowLimit: Int = mailBoxSize / 2
@@ -25,13 +26,9 @@ trait Actor[T] extends LoopRunnable {
 
   def process(implicit messageInContext: Message[T]): T => Unit
 
-  override protected def runAction: Unit = dequeue
-
-  private def dequeue: Unit = {
-//    println(s"$name treating message")
+  override protected def runAction: Unit = {
     Try(mailboxIn.dequeue()) match {
       case Success(message) => {
-//        println(s"$name, $message, ${mailboxIn.size}, $pressureReceived")
         message.sourceOpt match {
           case Some(source) if mailboxIn.size <= mailBoxLowLimit && Option(pressureSent.get(source.name)) == Some(true) => sendPressure(source, pressure = false)
           case _ =>
@@ -59,7 +56,7 @@ trait Actor[T] extends LoopRunnable {
     true
   }
 
-  private def isPressured: Boolean = pressureReceived.forall(tuple => !tuple._2)
+  def isPressured: Boolean = pressureReceived.forall(tuple => !tuple._2)
 
   def send[A](dest: Actor[A], content: A): Future[Boolean] = {
     val message = Message[A](Some(this), dest, content)
@@ -68,9 +65,9 @@ trait Actor[T] extends LoopRunnable {
 
   def mailboxMessageWaitingSize: Int = mailboxIn.size
 
-  def receivePressure(name: String, pressure: Boolean): Future[Boolean] = Future {
+  protected def receivePressure(name: String, pressure: Boolean): Future[Boolean] = Future {
     pressureReceived.put(name, pressure)
-//    println(s"${this.name} : receive pressure $name -> $pressure")
+    //    println(s"${this.name} : receive pressure $name -> $pressure")
     if (pressure) {
       stop
     } else if (isPressured) {
@@ -79,8 +76,8 @@ trait Actor[T] extends LoopRunnable {
     true
   }
 
-  def sendPressure(dest: Actor[_], pressure: Boolean): Future[Boolean] = {
-//    println(s"${this.name} sending pressure ${dest.name} -> $pressure")
+  protected def sendPressure(dest: Actor[_], pressure: Boolean): Future[Boolean] = {
+    //    println(s"${this.name} sending pressure ${dest.name} -> $pressure")
     pressureSent.put(dest.name, pressure)
     dest.receivePressure(this.name, pressure)
   }
