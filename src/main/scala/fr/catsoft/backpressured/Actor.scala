@@ -15,7 +15,6 @@ trait Actor[T] extends LoopRunnable {
 
   def mailBoxSize: Int
   protected val mailboxIn = LimitedQueue[Message[T]](mailBoxSize)
-  protected val mailboxPressure = LimitedQueue[T](mailBoxSize)
 
   protected val mailBoxLowLimit: Int = mailBoxSize / 2
   println(s"limit = $mailBoxLowLimit")
@@ -54,11 +53,13 @@ trait Actor[T] extends LoopRunnable {
     val fullQueue = mailboxIn.add(message)
     if (fullQueue) {
       message.sourceOpt.map(sendPressure(_, pressure = true))
-    } else if (wasEmpty) {
+    } else if (wasEmpty && isPressured) {
       start
     }
     true
   }
+
+  private def isPressured: Boolean = pressureReceived.forall(tuple => !tuple._2)
 
   def send[A](dest: Actor[A], content: A): Future[Boolean] = {
     val message = Message[A](Some(this), dest, content)
@@ -72,7 +73,7 @@ trait Actor[T] extends LoopRunnable {
 //    println(s"${this.name} : receive pressure $name -> $pressure")
     if (pressure) {
       stop
-    } else if (pressureReceived.forall(tuple => !tuple._2)) {
+    } else if (isPressured) {
       start
     }
     true

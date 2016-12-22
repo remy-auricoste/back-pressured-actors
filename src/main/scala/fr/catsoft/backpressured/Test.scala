@@ -7,13 +7,13 @@ import scala.concurrent.Future
 
 object Test extends App {
   val poolAk3 = new ActorPoolByMinMailBox[String] with StatusDefined {
-    override def actorTemplate: Boolean => Actor[String] = bool => MyActor("AK3", 2000, None)
+    override def actorTemplate: Boolean => Actor[String] = bool => MyActor("AK3", 2000, None, 5)
 
     override def poolSize: Int = 2
 
     override def getStatus: String = {
       val full = if (mailboxIn.isFull) "-|-" else "---"
-      full + poolActors.map(_.asInstanceOf[StatusDefined].getStatus).mkString("+")
+      full + mailboxMessageWaitingSize + "-" +poolActors.map(_.asInstanceOf[StatusDefined].getStatus).mkString("+")
     }
   }
   val ak2 = MyActor("AK2", 500, Some(poolAk3))
@@ -62,7 +62,7 @@ object Test extends App {
       val result = s"$param $name"
       destOption match {
         case Some(dest) => send(dest, result)
-        case None => //println(s"received : $result")
+        case None => println(s"received : $result")
       }
     }
 
